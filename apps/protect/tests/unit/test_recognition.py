@@ -473,3 +473,150 @@ class TestProtectKnownFaceMutationTools:
 
         assert result["success"] is False
         assert "Failed to merge known faces" in result["error"]
+
+
+class TestRecognitionManagerLicensePlates:
+    """Tests for the license-plate recognition group manager method.
+
+    Mirrors the Known Faces shape (``recognition/face/groups``); license plates
+    live behind ``recognition/vehicle/groups`` with the same ``labels`` /
+    ``minConfidence`` / pagination params.
+    """
+
+    @pytest.mark.asyncio
+    async def test_list_known_license_plates_success(self, mock_cm):
+        from unifi_core.protect.managers.recognition_manager import RecognitionManager
+
+        mock_cm.client.api_request.return_value = {
+            "groups": [
+                {
+                    "id": "plate-uuid-1",
+                    "name": "Example Vehicle",
+                    "matchedName": "ABC1234",
+                    "type": "vehicle",
+                    "imagePath": "/proxy/protect/api/recognition/vehicle/groups/plate-uuid-1/image",
+                    "enhancedPath": None,
+                    "detectionsCount": 42,
+                    "firstDetectedAt": 1778700000000,
+                    "lastDetectedAt": 1778701000000,
+                    "isNotificationEnabled": False,
+                    "isDegraded": False,
+                    "tags": [],
+                    "description": None,
+                    "createdAt": 1778690000000,
+                    "metadata": {
+                        "color": {"val": "black", "confidence": 80},
+                        "vehicleType": {"val": "suv", "confidence": 95},
+                    },
+                }
+            ],
+            "links": {"prev": None, "next": None},
+        }
+
+        result = await RecognitionManager(mock_cm).list_known_license_plates(page=2, page_size=50)
+
+        assert result["count"] == 1
+        assert result["links"] == {}
+        plate = result["license_plates"][0]
+        assert plate["id"] == "plate-uuid-1"
+        assert plate["name"] == "Example Vehicle"
+        assert plate["matched_name"] == "ABC1234"
+        assert plate["detections_count"] == 42
+        mock_cm.client.api_request.assert_awaited_once_with(
+            "recognition/vehicle/groups",
+            method="get",
+            params={
+                "labels": "groupType:known,groupType:interest",
+                "minConfidence": 30,
+                "orderBy": "name",
+                "orderDirection": "asc",
+                "pageSize": 50,
+                "page": 2,
+            },
+        )
+
+    @pytest.mark.asyncio
+    async def test_list_known_license_plates_known_only(self, mock_cm):
+        from unifi_core.protect.managers.recognition_manager import RecognitionManager
+
+        mock_cm.client.api_request.return_value = {"groups": [], "links": {"prev": None, "next": None}}
+
+        result = await RecognitionManager(mock_cm).list_known_license_plates(include_interest=False)
+
+        assert result["count"] == 0
+        params = mock_cm.client.api_request.await_args.kwargs["params"]
+        assert params["labels"] == "groupType:known"
+
+    @pytest.mark.asyncio
+    async def test_list_known_license_plates_unknown_group_type(self, mock_cm):
+        from unifi_core.protect.managers.recognition_manager import RecognitionManager
+
+        mock_cm.client.api_request.return_value = {"groups": [], "links": {"prev": None, "next": None}}
+
+        result = await RecognitionManager(mock_cm).list_known_license_plates(group_types=["unknown"])
+
+        assert result["count"] == 0
+        params = mock_cm.client.api_request.await_args.kwargs["params"]
+        assert params["labels"] == "groupType:unknown"
+
+
+class TestProtectListKnownLicensePlatesTool:
+    """Tool-layer tests for the pass-through wrapping that diverges from the faces tool.
+
+    The plates tool intentionally does NOT re-serialize the manager output (the faces
+    tool double-dumps), so the tool's own wrapping (license_plates/count/links + the
+    error handler) is exercised here, separately from the manager tests above.
+    """
+
+    @pytest.mark.asyncio
+    async def test_success(self, mock_recognition_manager):
+        from unifi_protect_mcp.tools.recognition import protect_list_known_license_plates
+
+        mock_recognition_manager.list_known_license_plates = AsyncMock(
+            return_value={
+                "license_plates": [{"id": "plate-uuid-1", "name": "Example Vehicle", "matched_name": "ABC1234"}],
+                "count": 1,
+                "links": {},
+            }
+        )
+
+        result = await protect_list_known_license_plates(page_size=25, min_confidence=40)
+
+        assert result["success"] is True
+        assert result["data"]["count"] == 1
+        assert result["data"]["license_plates"][0]["id"] == "plate-uuid-1"
+        mock_recognition_manager.list_known_license_plates.assert_awaited_once_with(
+            page=None,
+            page_size=25,
+            min_confidence=40,
+            include_interest=True,
+            group_types=None,
+            order_by="name",
+            order_direction="asc",
+        )
+
+    @pytest.mark.asyncio
+    async def test_empty(self, mock_recognition_manager):
+        from unifi_protect_mcp.tools.recognition import protect_list_known_license_plates
+
+        mock_recognition_manager.list_known_license_plates = AsyncMock(
+            return_value={"license_plates": [], "count": 0, "links": {}}
+        )
+
+        result = await protect_list_known_license_plates()
+
+        assert result["success"] is True
+        assert result["data"]["count"] == 0
+        assert result["data"]["license_plates"] == []
+
+    @pytest.mark.asyncio
+    async def test_error(self, mock_recognition_manager):
+        from unifi_protect_mcp.tools.recognition import protect_list_known_license_plates
+
+        mock_recognition_manager.list_known_license_plates = AsyncMock(side_effect=RuntimeError("connection lost"))
+
+        result = await protect_list_known_license_plates()
+
+        assert result["success"] is False
+        assert "Failed to list known license plates" in result["error"]
+        assert "connection lost" in result["error"]
