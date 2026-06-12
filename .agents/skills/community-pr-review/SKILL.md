@@ -262,6 +262,12 @@ and some fields only appear when specific configuration exists.
 tests fail with "resource temporarily unavailable" or "sync in progress," verify the HA cluster has
 stabilized. Retry after 30–60 seconds. Do not block merge on HA transient failures.
 
+**Gotcha — enum-hint PRs: harness defaults miss the change entirely.** When a PR adds enum-value hints or restricts accepted values for a tool parameter, `scripts/live_smoke.py` invokes each tool with default arguments only and exercises none of the constrained paths. Run a targeted script that explicitly passes each new enum value and asserts the response shape is correct (or fails predictably for invalid values).
+
+**Gotcha — hardware-gated tools: deferral requires four conditions.** Some tools succeed only with specific attached hardware. Before blocking merge on a live test failure, confirm all four: (a) the failing tool targets optional hardware (e.g., Access controller), (b) the test environment lacks that hardware, (c) the failure message indicates absence ("device not found" / "hardware unavailable"), not a logic or auth error, and (d) the same tool passes on an environment with the hardware attached. If all four hold, document the deferral explicitly in the PR description.
+
+**Gotcha — HTTP 401 on uiprotect bootstrap path is benign noise.** Live smoke runs against a controller with Protect enabled emit HTTP 401 on the uiprotect bootstrap path during library startup. This is the library's startup probe and is expected — not an authentication failure. Do not block merge or file a bug on a 401 from this specific path.
+
 ### API Family Boundary Check (V2 vs. Integration)
 
 **Target:** Any PR that adds or modifies tools exposing UniFi API identifiers.
@@ -310,6 +316,16 @@ When a PR body claims "fully additive," diff every response shape against `main`
 disappears from the default path is a breaking change. Gate the narrowing behind an opt-in flag, or
 explicitly document it as an intentional breaking change.
 
+### Cross-Platform Validation (Windows-Targeting PRs)
+
+For any PR that adds or modifies Windows-specific behavior (PowerShell prereq scripts, `.exe` executable detection, CRLF line endings), validate the following from macOS before approving:
+
+1. **Plugin bundle `.ps1` presence** — unzip the plugin bundle and confirm `.ps1` scripts are included: `unzip -l <bundle>.zip | grep '\.ps1'`. Missing scripts mean Windows prereq flows will silently fail to load.
+2. **Stdio MCP auth probe** — invoke the MCP server via stdio with intentionally bogus credentials and confirm the error response is human-readable (not a generic opaque "MCP error"). Windows users hit the stdio auth path first; an opaque error leaves them with no recovery action.
+3. **Prereq script CRLF and `.exe` detection** — read the modified Windows prereq scripts and confirm CRLF handling and `.exe` suffix detection are correct. These regressions are invisible to macOS test runs.
+
+You cannot execute `.ps1` scripts directly from macOS, but these three checks catch the most common Windows regression classes without requiring Windows hardware.
+
 ---
 
 ## Step 1.5b — AI-Bot vs Human Contributor Handling
@@ -356,6 +372,24 @@ hard blockers and are leaving suggestions.
 
 ---
 
+## Hard Blockers (must fix before merge)
+
+See Gates 1–4 above for detailed checklists. Summary:
+- F-string loggers in any modified file (Gate 1B)
+- Ruff lint violations (Gate 1A)
+- Missing Pydantic model wiring for new domains (Gate 2)
+- Doc site not updated for tool additions/removals (Gate 3)
+- Non-`None` defaults on shared base model fields (Gate 4)
+- Mixed API identifier families (Step 1.5)
+
+## Minor Items (nice-to-have)
+
+- Naming alignment with existing conventions
+- Test coverage for edge cases not on the happy path
+- PR body prose (not blocking, but worth noting)
+
+---
+
 ## Step 2 — Apply Fixes (Fork-Edit Model)
 
 If you found gaps in Step 1, don't request changes — fix them directly on the contributor's
@@ -365,7 +399,8 @@ fork branch. This is the established model for trusted contributors and for unre
 # Add the contributor's fork as a remote (one-time setup)
 git remote add <contributor> https://github.com/<contributor>/unifi-mcp.git
 
-# Verify and update the remote URL if stale (e.g., fork was recreated since last PR)
+# Verify and update the remote URL if stale (e.g., after the unifi-network-mcp → unifi-mcp
+# repo rename, or if the fork was recreated since the last PR)
 git remote get-url <contributor>
 git remote set-url <contributor> https://github.com/<contributor>/unifi-mcp.git  # if URL is wrong
 
@@ -376,6 +411,8 @@ git checkout -b review/<pr-branch> <contributor>/<pr-branch>
 # Make your fixes, commit with attribution context, then push back
 git push <contributor> HEAD:<pr-branch>
 ```
+
+**Tip:** `gh pr checkout <PR-number>` resolves the PR's head ref directly without requiring a named remote. Use this when the remote URL may be stale — it bypasses the rename/recreate gotcha entirely.
 
 **Trusted contributor definition:** Level99 qualifies (7+ merged PRs). For first-time or
 low-history contributors, prefer review comments so they learn the patterns.
@@ -607,5 +644,9 @@ developer correctly pushed back. Always verify with live reproduction before mer
 | mergeStateStatus:BLOCKED (Step 4) | Blocking | `gh pr view --json mergeStateStatus,reviewDecision` | Merging when protection rules block despite mergeable:MERGEABLE |
 | AI-Bot vs human (Step 1.5b) | Precedent gate | Issue tracker + PR scope | Merging bot PRs with parallel in-house work; missing credit for human contributors |
 | Live smoke tests (Step 1.5) | Validation requirement | `scripts/live_smoke.py` output | Approval without actual live controller tests; mock-only validation |
+| Enum-hint PRs (Step 1.5) | Coverage gap | Targeted script with explicit enum args | Harness defaults miss all constrained parameter paths |
+| Hardware-gated deferral (Step 1.5) | Deferral gate | Four-condition checklist | Blocking merge on hardware-absent failures without documenting deferral |
+| uiprotect 401 (Step 1.5) | Benign noise | Live smoke Protect bootstrap output | Filing bug or blocking merge on expected startup probe 401 |
 | Mutation cycles (Step 1.5) | Field preservation blocker | Create → update → verify → delete cycle | Update tools that reconstruct objects silently zero fields |
+| Cross-platform PRs (Step 1.5) | Validation requirement | Plugin bundle .ps1, stdio auth probe, prereq scripts | Approving Windows-targeting PRs without macOS cross-platform checks |
 | Issue triage (Triage section) | Evidence gate | Raw API payload from reporter | Implementing fixes without confirmed reproduction or raw payload inspection |

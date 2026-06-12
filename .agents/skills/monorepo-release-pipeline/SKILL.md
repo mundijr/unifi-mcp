@@ -657,6 +657,47 @@ After pushing a tag, verify it resolved correctly before closing the work.
 
 ---
 
+## Procedure I: Dependabot Dependency Update Management
+
+Dependabot automates dependency updates but creates operational challenges in a `uv`-managed monorepo. Understanding the failure patterns prevents wasted CI cycles and missed major-version bumps.
+
+### Why Dependabot PRs Break CI
+
+Dependabot updates the lockfile for one package at a time. When a dependency update resolves differently across packages (e.g., a transitive dependency bumped in one app but not others), the workspace-wide `uv lock --check` gate fails. The error signal is **identical** for both minor constraint mismatches and major-version bumps — a uniform "lockfile check failed" that masks the actual severity.
+
+**Major-version bumps are invisible at the PR level:** When Dependabot bumps a dependency from 6.x to 7.x, the CI failure looks identical to a minor version conflict. Always inspect the actual version change in the PR diff — do not assume all Dependabot failures are patch-level issues.
+
+### Batching Pattern
+
+When multiple Dependabot PRs fail CI with the same class of lockfile error, merge them into a single maintainer branch rather than resolving each independently:
+
+```bash
+# Branch off main
+git checkout -b deps/batch-dependabot main
+
+# Apply dependency changes from each failing Dependabot PR (cherry-pick or manual edit),
+# then re-lock from the combined state:
+uv lock
+
+# Run per-package tests before opening the PR (run separately, not from the repo root):
+cd apps/network && uv run pytest && cd ../..
+cd apps/protect && uv run pytest && cd ../..
+
+# Open a single PR from deps/batch-dependabot to main
+# Close the individual Dependabot PRs as superseded
+```
+
+Benefits:
+- Single CI run over the combined update (one lockfile, one PR)
+- Surfaces hidden major-version bumps that individual PRs obscure
+- Allows rational grouping (e.g., `uiprotect`-related vs. unrelated security patches)
+
+### pyproject Floor vs. Lockfile Drift
+
+After batching, verify that each updated package's lower bound in `pyproject.toml` still permits the resolved version. If the floor is tighter than the lock resolution, `uv lock --check` passes locally (workspace override) but published wheels will fail on fresh installs — same PyPI-only failure mode as the pin-alignment gotcha. Run the wheel-metadata check from Procedure D before merging the batched PR.
+
+---
+
 ## Cross-Cutting Gotchas
 
 **Sibling tag contamination.** If `git_describe_command` `--match` is too broad
@@ -729,3 +770,5 @@ release to give users with explicit pins an upgrade path.
 installing, checking, or troubleshooting. `unifi-network-mcp` ≠ `unifi-mcp-network`. See
 the Package Map for correct names. When debugging a release, verify the PyPI project page
 uses the expected name.
+
+**Cross-package combined pytest run causes test configuration collision.** Running pytest with a path that spans multiple packages (e.g., `uv run pytest packages/ apps/` from the repo root) causes pytest to load conflicting test configuration files from multiple packages simultaneously, producing failures unrelated to any code change. Fix: always run pytest per-package — `cd apps/network && uv run pytest`, then repeat for each package in its own directory. CI workflows are already scoped this way. This is particularly important when testing Dependabot batch branches where multiple packages change at once (see Procedure I).
