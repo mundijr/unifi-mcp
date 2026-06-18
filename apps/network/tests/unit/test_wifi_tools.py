@@ -376,8 +376,16 @@ class TestNetworkManagerApGroups:
                 "attr_hidden_id": "default",
             }
         ]
-        # First call: list_ap_groups (GET list), second call: PUT merged data
-        mock_connection.request.side_effect = [existing_groups, {}]
+        updated_groups = [
+            {
+                "_id": "grp1",
+                "name": "Renamed Group",
+                "device_macs": ["aa:bb:cc:dd:ee:01", "aa:bb:cc:dd:ee:02"],
+                "attr_hidden_id": "default",
+            }
+        ]
+        # GET list (existence) -> PUT merged data -> GET list (persistence re-check)
+        mock_connection.request.side_effect = [existing_groups, {}, updated_groups]
 
         result = await network_manager.update_ap_group(
             "grp1",
@@ -385,8 +393,8 @@ class TestNetworkManagerApGroups:
         )
 
         assert result is True
-        # Verify two requests were made: GET list then PUT
-        assert mock_connection.request.call_count == 2
+        # GET (existence) + PUT + GET (persistence verification)
+        assert mock_connection.request.call_count == 3
         # Second call should be the PUT with merged data
         put_call = mock_connection.request.call_args_list[1]
         put_req = put_call[0][0]

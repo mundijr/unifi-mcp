@@ -14,6 +14,40 @@ CACHE_PREFIX_NETWORKS = "networks"
 CACHE_PREFIX_WLANS = "wlans"
 CACHE_PREFIX_AP_GROUPS = "ap_groups"
 
+# Fields the controller never echoes back verbatim (write-only / redacted), so a
+# re-read cannot confirm them. Excluded from post-write persistence verification.
+_UNVERIFIABLE_UPDATE_KEYS = frozenset(
+    {
+        "x_passphrase",
+        "x_password",
+        "sae_psk",
+        "private_preshared_keys",
+        "x_iapp_key",
+        "password",
+    }
+)
+
+
+def _unpersisted_fields(before: Dict[str, Any], after: Dict[str, Any], requested: Dict[str, Any]) -> List[str]:
+    """Return requested keys that were meant to change but did not move.
+
+    A field counts as *not persisted* only when it was actually being changed
+    (requested value differs from the pre-write value) yet the re-read value is
+    still identical to the pre-write value. Fields the controller normalizes to a
+    different-but-non-original value are treated as persisted (avoids false
+    positives), and write-only/redacted fields are skipped entirely.
+    """
+    stuck: List[str] = []
+    for key, want in requested.items():
+        if key in _UNVERIFIABLE_UPDATE_KEYS:
+            continue
+        prev = before.get(key)
+        if prev == want:
+            continue  # no real change requested for this field
+        if after.get(key) == prev:
+            stuck.append(key)
+    return stuck
+
 
 class NetworkManager:
     """Manages network (LAN/VLAN) and WLAN operations on the Unifi Controller."""
@@ -157,6 +191,19 @@ class NetworkManager:
             await self._connection.request(api_request)
             logger.info("Update command sent for network %s with merged data.", network_id)
             self._connection._invalidate_cache(f"{CACHE_PREFIX_NETWORKS}_{self._connection.site}")
+
+            # Verify the controller actually persisted the change. Some controller
+            # versions answer the legacy /rest/networkconf PUT with rc:ok but
+            # silently ignore the write, so a non-raising request() is not
+            # sufficient evidence of success.
+            refetched = await self.get_network_details(network_id)
+            stuck = _unpersisted_fields(existing_network, refetched, update_data)
+            if stuck:
+                return False, (
+                    "Controller accepted the request but did not persist field(s): "
+                    f"{', '.join(sorted(stuck))}. The legacy /rest/networkconf write "
+                    "path may be ignored for these fields on this controller version."
+                )
             return True, None
         except Exception as e:
             logger.error("Error updating network %s: %s", network_id, e, exc_info=True)
@@ -294,6 +341,19 @@ class NetworkManager:
             await self._connection.request(api_request)
             logger.info("Update command sent for WLAN %s with merged data.", wlan_id)
             self._connection._invalidate_cache(f"{CACHE_PREFIX_WLANS}_{self._connection.site}")
+
+            # Verify the controller actually persisted the change. Some controller
+            # / UniFi OS versions answer the legacy /rest/wlanconf PUT with rc:ok
+            # but silently ignore the write, so a non-raising request() is not
+            # sufficient evidence of success.
+            refetched = await self.get_wlan_details(wlan_id)
+            stuck = _unpersisted_fields(existing_wlan, refetched, update_data)
+            if stuck:
+                return False, (
+                    "Controller accepted the request but did not persist field(s): "
+                    f"{', '.join(sorted(stuck))}. The legacy /rest/wlanconf write path "
+                    "may be ignored for these fields on this controller version."
+                )
             return True, None
         except Exception as e:
             logger.error("Error updating WLAN %s: %s", wlan_id, e, exc_info=True)
@@ -445,6 +505,18 @@ class NetworkManager:
             await self._connection.request(api_request)
 
             self._connection._invalidate_cache(CACHE_PREFIX_AP_GROUPS)
+
+            # Verify the controller actually persisted the change; a non-raising
+            # request() is not sufficient evidence the write was applied.
+            refetched = await self.get_ap_group_details(group_id)
+            stuck = _unpersisted_fields(existing, refetched, update_data)
+            if stuck:
+                logger.error(
+                    "AP group %s update not persisted by controller; fields unchanged: %s",
+                    group_id,
+                    ", ".join(sorted(stuck)),
+                )
+                return False
             return True
         except Exception as e:
             logger.error("Error updating AP group %s: %s", group_id, e, exc_info=True)
