@@ -1029,6 +1029,13 @@ class LiveSmokeRunner:
             self.skip("unifi_delete_ap_group", "approved", "AP group create did not return an id")
             return
         self.report.created_resources.append({"type": "ap_group", "id": group_id, "name": name})
+        # Exercise update_ap_group: with verify-after-write, a silently dropped
+        # change surfaces as a failed record instead of a phantom success.
+        await self.call(
+            "unifi_update_ap_group",
+            {"group_id": group_id, "update_data": {"name": f"{name}-upd"}, "confirm": True},
+            "approved:update",
+        )
         delete = await self.call("unifi_delete_ap_group", {"group_id": group_id, "confirm": True}, "approved:delete")
         if delete.success:
             self.report.cleaned_resources.append({"type": "ap_group", "id": group_id, "name": name})
@@ -1062,6 +1069,14 @@ class LiveSmokeRunner:
             self.skip("unifi_delete_wlan", "approved", "WLAN create did not return an id")
             return
         self.report.created_resources.append({"type": "wlan", "id": wlan_id, "name": name})
+        # Exercise update_wlan: the WLAN is created hidden, so flipping hide_ssid
+        # is a real change. With verify-after-write a controller that silently
+        # ignores the legacy /rest/wlanconf PUT now yields a failed record here.
+        await self.call(
+            "unifi_update_wlan",
+            {"wlan_id": wlan_id, "update_data": {"hide_ssid": False}, "confirm": True},
+            "approved:update",
+        )
         delete = await self.call("unifi_delete_wlan", {"wlan_id": wlan_id, "confirm": True}, "approved:delete")
         if delete.success:
             self.report.cleaned_resources.append({"type": "wlan", "id": wlan_id, "name": name})
