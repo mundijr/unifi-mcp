@@ -633,6 +633,7 @@ class LiveSmokeRunner:
             await self.lifecycle_network_firewall_policy()
             await self.lifecycle_network_oon_policy()
             await self.lifecycle_network_voucher()
+            await self.lifecycle_network_traffic_route()
         elif self.server_key == "protect":
             await self.approved_protect_physical()
         elif self.server_key == "access":
@@ -778,7 +779,10 @@ class LiveSmokeRunner:
             route_id = self.value_for_param(name, "route_id")
             if not route_id:
                 return None, "could not discover required argument route_id"
-            return {"route_id": route_id, "enabled": True}, ""
+            # Exercise a widened match field (target_devices) in preview. run_previews
+            # forces confirm=False, so this only renders a current-vs-proposed diff and
+            # runs the tool's client-side target_devices validation — nothing is written.
+            return {"route_id": route_id, "target_devices": [{"type": "ALL_CLIENTS"}]}, ""
         if name == "unifi_update_usergroup":
             group_id = self.value_for_param(name, "group_id")
             if not group_id:
@@ -893,6 +897,30 @@ class LiveSmokeRunner:
             if value:
                 return str(value)
         return None
+
+    def traffic_route_detail(self) -> dict[str, Any]:
+        """Full route dict from the most recent unifi_get_traffic_route_details call."""
+        payload = self.cache.by_tool.get("unifi_get_traffic_route_details", {})
+        detail = payload.get("details") if isinstance(payload, dict) else None
+        return detail if isinstance(detail, dict) else {}
+
+    def record_check(self, tool: str, phase: str, ok: bool, detail: str) -> None:
+        """Append a pass/fail verification record (a re-read content assertion).
+
+        Unlike WLAN/AP-group updates, the traffic-route manager does not verify-
+        after-write, so the lifecycle re-reads the route and records whether the
+        change actually persisted/reverted. A failed record fails the run.
+        """
+        self.report.records.append(
+            SmokeRecord(
+                tool=tool,
+                phase=phase,
+                status="ok" if ok else "failed",
+                success=ok,
+                summary={"check": detail},
+            )
+        )
+        print(f"{self.server_key} {phase} {'ok' if ok else 'failed'}: {tool} - {detail}", flush=True)
 
     async def lifecycle_network_dns(self) -> None:
         stamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
@@ -1203,6 +1231,94 @@ class LiveSmokeRunner:
         )
         if revoke.success:
             self.report.cleaned_resources.append({"type": "voucher", "id": voucher_id, "name": note})
+
+    async def lifecycle_network_traffic_route(self) -> None:
+        # Traffic routes can't be created via MCP (they require a VPN policy), so the
+        # widened-update path (PR #377: target_devices/domains/ip_addresses/ip_ranges/
+        # regions/next_hop) is exercised against an EXISTING route in a fully
+        # reversible way: read current domains, append a throwaway non-resolving
+        # domain, apply, re-read to prove it persisted, then revert to the original
+        # list and re-read to prove it reverted. An operator can pin the target route
+        # via UNIFI_SMOKE_TRAFFIC_ROUTE_ID; otherwise the first DOMAIN route is used.
+        await self.call("unifi_list_traffic_routes", {}, "approved:seed")
+        routes = self.cache.items_from_tool("unifi_list_traffic_routes", "traffic_routes") or self.cache.items(
+            "traffic_routes"
+        )
+        pinned = os.environ.get("UNIFI_SMOKE_TRAFFIC_ROUTE_ID")
+        route_id: Any = None
+        if pinned:
+            if not any(first_value(r, ("_id", "id")) == pinned for r in routes):
+                self.skip("unifi_update_traffic_route", "approved", f"pinned route {pinned} not found")
+                return
+            route_id = pinned
+        else:
+            for r in routes:
+                if str(r.get("matching_target", "")).upper() == "DOMAIN":
+                    route_id = first_value(r, ("_id", "id"))
+                    break
+        if not route_id:
+            self.skip("unifi_update_traffic_route", "approved", "no DOMAIN traffic route to exercise")
+            return
+
+        await self.call("unifi_get_traffic_route_details", {"route_id": route_id}, "approved:get")
+        detail = self.traffic_route_detail()
+        original_domains = detail.get("domains")
+        if not isinstance(original_domains, list) or not original_domains:
+            self.skip("unifi_update_traffic_route", "approved", "route has no domains list to exercise")
+            return
+        route_name = detail.get("description", route_id)
+
+        stamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+        # Use the IANA documentation domain (example.com) so the controller accepts it
+        # as a valid domain — a reserved TLD like .invalid is rejected (api.err.InvalidDomain).
+        probe_domain = f"{RUN_PREFIX}-{stamp}.example.com"
+        new_domains = [*original_domains, {"domain": probe_domain, "ports": [], "port_ranges": []}]
+
+        # Preview the widened-field change (confirm=False → no mutation).
+        await self.call(
+            "unifi_update_traffic_route",
+            {"route_id": route_id, "domains": new_domains, "confirm": False},
+            "approved:preview",
+        )
+
+        # Apply the reversible change.
+        self.report.created_resources.append(
+            {"type": "traffic_route_domain_probe", "id": route_id, "name": probe_domain}
+        )
+        await self.call(
+            "unifi_update_traffic_route",
+            {"route_id": route_id, "domains": new_domains, "confirm": True},
+            "approved:update",
+        )
+        # Re-read and prove the probe domain persisted.
+        await self.call("unifi_get_traffic_route_details", {"route_id": route_id}, "approved:verify")
+        persisted = any(d.get("domain") == probe_domain for d in self.traffic_route_detail().get("domains", []))
+        self.record_check(
+            "unifi_update_traffic_route",
+            "approved:verify",
+            persisted,
+            f"probe domain {probe_domain} present on '{route_name}' after update",
+        )
+
+        # Revert to the original domains list.
+        await self.call(
+            "unifi_update_traffic_route",
+            {"route_id": route_id, "domains": original_domains, "confirm": True},
+            "approved:revert",
+        )
+        await self.call("unifi_get_traffic_route_details", {"route_id": route_id}, "approved:verify-revert")
+        reverted_domains = self.traffic_route_detail().get("domains", [])
+        reverted = all(d.get("domain") != probe_domain for d in reverted_domains)
+        self.record_check(
+            "unifi_update_traffic_route",
+            "approved:verify-revert",
+            reverted,
+            f"probe domain removed; '{route_name}' domains restored to {len(original_domains)} entries",
+        )
+        if reverted:
+            self.report.cleaned_resources.append(
+                {"type": "traffic_route_domain_probe", "id": route_id, "name": probe_domain}
+            )
 
     async def lifecycle_protect_alarm_rule(self) -> None:
         if not self.cache.items_from_tool("protect_list_cameras", "cameras"):

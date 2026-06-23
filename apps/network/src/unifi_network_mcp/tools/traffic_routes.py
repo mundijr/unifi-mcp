@@ -6,7 +6,7 @@ on a UniFi Network Controller using the V2 API.
 """
 
 import logging
-from typing import Annotated, Any, Dict, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
 from mcp.types import ToolAnnotations
 from pydantic import Field
@@ -92,11 +92,22 @@ async def get_traffic_route_details(
     name="unifi_update_traffic_route",
     description="""Update a traffic route's settings.
 
-Can update:
+Toggle fields:
 - enabled: Enable or disable the traffic route
 - kill_switch_enabled: Enable/disable the kill switch (blocks traffic if VPN is down)
 
-At least one parameter must be provided.""",
+Routing-match fields (each REPLACES the whole existing list/value — read the route
+first with unifi_get_traffic_route_details, then send the full desired value):
+- target_devices: Which clients/networks the route applies to. List of objects, e.g.
+  [{"type": "CLIENT", "client_mac": "aa:bb:cc:dd:ee:ff"}],
+  [{"type": "NETWORK", "network_id": "<id>"}], or [{"type": "ALL_CLIENTS"}].
+- domains: List of domain objects, e.g. [{"domain": "example.com", "ports": [], "port_ranges": []}].
+- ip_addresses: List of IP/subnet objects (for matching_target=IP routes).
+- ip_ranges: List of IP-range objects.
+- regions: List of ISO country/region codes, e.g. ["US", "CA"].
+- next_hop: Next-hop IP address (string) for static next-hop routes.
+
+At least one field must be provided.""",
     permission_category="traffic_routes",
     permission_action="update",
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False),
@@ -113,44 +124,102 @@ async def update_traffic_route(
             description="Enable (true) or disable (false) the kill switch, which blocks traffic if the VPN goes down"
         ),
     ] = None,
+    target_devices: Annotated[
+        Optional[List[Dict[str, Any]]],
+        Field(
+            description=(
+                "Replace the route's target devices. List of objects, e.g. "
+                '[{"type": "CLIENT", "client_mac": "aa:bb:cc:dd:ee:ff"}], '
+                '[{"type": "NETWORK", "network_id": "<id>"}], or [{"type": "ALL_CLIENTS"}].'
+            )
+        ),
+    ] = None,
+    domains: Annotated[
+        Optional[List[Dict[str, Any]]],
+        Field(
+            description=(
+                "Replace the route's domains. List of objects, e.g. "
+                '[{"domain": "example.com", "ports": [], "port_ranges": []}].'
+            )
+        ),
+    ] = None,
+    ip_addresses: Annotated[
+        Optional[List[Dict[str, Any]]],
+        Field(description="Replace the route's IP addresses/subnets (for matching_target=IP routes)."),
+    ] = None,
+    ip_ranges: Annotated[
+        Optional[List[Dict[str, Any]]],
+        Field(description="Replace the route's IP ranges."),
+    ] = None,
+    regions: Annotated[
+        Optional[List[str]],
+        Field(description='Replace the route\'s regions. List of ISO country/region codes, e.g. ["US", "CA"].'),
+    ] = None,
+    next_hop: Annotated[
+        Optional[str],
+        Field(description="Next-hop IP address (string) for static next-hop routes."),
+    ] = None,
     confirm: Annotated[
         bool,
         Field(description="When true, applies the update. When false (default), returns a preview of the changes"),
     ] = False,
 ) -> Dict[str, Any]:
     """Update a traffic route's settings."""
-    if enabled is None and kill_switch_enabled is None:
+    field_values: Dict[str, Any] = {
+        "enabled": enabled,
+        "kill_switch_enabled": kill_switch_enabled,
+        "target_devices": target_devices,
+        "domains": domains,
+        "ip_addresses": ip_addresses,
+        "ip_ranges": ip_ranges,
+        "regions": regions,
+        "next_hop": next_hop,
+    }
+    updates: Dict[str, Any] = {k: v for k, v in field_values.items() if v is not None}
+
+    if not updates:
         return {
             "success": False,
-            "error": "At least one of 'enabled' or 'kill_switch_enabled' must be provided.",
+            "error": (
+                "At least one updatable field must be provided: enabled, kill_switch_enabled, "
+                "target_devices, domains, ip_addresses, ip_ranges, regions, next_hop."
+            ),
         }
 
-    updates: Dict[str, Any] = {}
-    if enabled is not None:
-        updates["enabled"] = enabled
-    if kill_switch_enabled is not None:
-        updates["kill_switch_enabled"] = kill_switch_enabled
-
-    if not confirm:
-        return update_preview(
-            resource_type="traffic_route",
-            resource_id=route_id,
-            resource_name=route_id,
-            current_state={},
-            updates=updates,
-        )
+    # Validate list-shaped fields client-side before touching the controller.
+    for field in ("target_devices", "domains", "ip_addresses", "ip_ranges", "regions"):
+        if field in updates and not isinstance(updates[field], list):
+            return {"success": False, "error": f"'{field}' must be a list."}
+    for entry in updates.get("target_devices", []):
+        if not isinstance(entry, dict) or "type" not in entry:
+            return {
+                "success": False,
+                "error": (
+                    "Each target_devices entry must be an object with a 'type', e.g. "
+                    '{"type": "CLIENT", "client_mac": "aa:bb:cc:dd:ee:ff"}, '
+                    '{"type": "NETWORK", "network_id": "<id>"}, or {"type": "ALL_CLIENTS"}.'
+                ),
+            }
 
     try:
+        # Fetch current route so the preview can show what is being replaced.
+        current = await traffic_route_manager.get_traffic_route_details(route_id)
+        route_name = current.get("description", route_id)
+
+        if not confirm:
+            return update_preview(
+                resource_type="traffic_route",
+                resource_id=route_id,
+                resource_name=route_name,
+                current_state=current,
+                updates=updates,
+            )
+
         success = await traffic_route_manager.update_traffic_route(route_id, **updates)
         if success:
-            changes = []
-            if enabled is not None:
-                changes.append(f"enabled={'on' if enabled else 'off'}")
-            if kill_switch_enabled is not None:
-                changes.append(f"kill_switch={'on' if kill_switch_enabled else 'off'}")
             return {
                 "success": True,
-                "message": f"Traffic route '{route_id}' updated: {', '.join(changes)}.",
+                "message": f"Traffic route '{route_name}' updated: {', '.join(sorted(updates.keys()))}.",
             }
         return {
             "success": False,

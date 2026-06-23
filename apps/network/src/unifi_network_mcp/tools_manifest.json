@@ -16808,7 +16808,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Update a traffic route's settings.\n\nCan update:\n- enabled: Enable or disable the traffic route\n- kill_switch_enabled: Enable/disable the kill switch (blocks traffic if VPN is down)\n\nAt least one parameter must be provided.",
+      "description": "Update a traffic route's settings.\n\nToggle fields:\n- enabled: Enable or disable the traffic route\n- kill_switch_enabled: Enable/disable the kill switch (blocks traffic if VPN is down)\n\nRouting-match fields (each REPLACES the whole existing list/value \u2014 read the route\nfirst with unifi_get_traffic_route_details, then send the full desired value):\n- target_devices: Which clients/networks the route applies to. List of objects, e.g.\n  [{\"type\": \"CLIENT\", \"client_mac\": \"aa:bb:cc:dd:ee:ff\"}],\n  [{\"type\": \"NETWORK\", \"network_id\": \"<id>\"}], or [{\"type\": \"ALL_CLIENTS\"}].\n- domains: List of domain objects, e.g. [{\"domain\": \"example.com\", \"ports\": [], \"port_ranges\": []}].\n- ip_addresses: List of IP/subnet objects (for matching_target=IP routes).\n- ip_ranges: List of IP-range objects.\n- regions: List of ISO country/region codes, e.g. [\"US\", \"CA\"].\n- next_hop: Next-hop IP address (string) for static next-hop routes.\n\nAt least one field must be provided.",
       "name": "unifi_update_traffic_route",
       "permission_action": "update",
       "permission_category": "traffic_routes",
@@ -16819,17 +16819,41 @@
               "description": "When true, applies the update. When false (default), returns a preview of the changes",
               "type": "boolean"
             },
+            "domains": {
+              "description": "Replace the route's domains. List of objects, e.g. [{\"domain\": \"example.com\", \"ports\": [], \"port_ranges\": []}].",
+              "type": "array"
+            },
             "enabled": {
               "description": "Enable (true) or disable (false) the traffic route",
               "type": "boolean"
+            },
+            "ip_addresses": {
+              "description": "Replace the route's IP addresses/subnets (for matching_target=IP routes).",
+              "type": "array"
+            },
+            "ip_ranges": {
+              "description": "Replace the route's IP ranges.",
+              "type": "array"
             },
             "kill_switch_enabled": {
               "description": "Enable (true) or disable (false) the kill switch, which blocks traffic if the VPN goes down",
               "type": "boolean"
             },
+            "next_hop": {
+              "description": "Next-hop IP address (string) for static next-hop routes.",
+              "type": "string"
+            },
+            "regions": {
+              "description": "Replace the route's regions. List of ISO country/region codes, e.g. [\"US\", \"CA\"].",
+              "type": "array"
+            },
             "route_id": {
               "description": "Unique identifier (_id) of the traffic route to update (from unifi_list_traffic_routes)",
               "type": "string"
+            },
+            "target_devices": {
+              "description": "Replace the route's target devices. List of objects, e.g. [{\"type\": \"CLIENT\", \"client_mac\": \"aa:bb:cc:dd:ee:ff\"}], [{\"type\": \"NETWORK\", \"network_id\": \"<id>\"}], or [{\"type\": \"ALL_CLIENTS\"}].",
+              "type": "array"
             }
           },
           "required": [

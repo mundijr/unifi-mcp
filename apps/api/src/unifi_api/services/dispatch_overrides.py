@@ -78,6 +78,10 @@ DISPATCH_OVERRIDES: dict[str, tuple[str, str]] = {
     "unifi_toggle_qos_rule_enabled": ("qos_manager", "update_qos_rule"),
     "unifi_toggle_oon_policy": ("oon_manager", "toggle_oon_policy"),
     "unifi_toggle_traffic_route": ("traffic_route_manager", "toggle_traffic_route"),
+    # update_traffic_route now pre-fetches the route via get_traffic_route_details
+    # to render a current-vs-proposed preview, so the AST walker captures the read
+    # method first. Pin dispatch to the mutation method.
+    "unifi_update_traffic_route": ("traffic_route_manager", "update_traffic_route"),
     # update_device_radio: tool needs current radio_table to identify target band.
     "unifi_update_device_radio": ("device_manager", "update_device_radio"),
     # Stats: tool combines existence check on client/device with stats fetch.
