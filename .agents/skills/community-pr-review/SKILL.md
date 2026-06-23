@@ -23,7 +23,7 @@ Community PRs go through a fixed quality checklist before merge. For trusted con
 branch rather than requesting round-trip revisions — this preserves attribution while eliminating
 latency. An exception exists for first-time contributors who are historically unresponsive: when the fix is
 trivial (ruff format, simple doc change), apply fork-edit rather than request changes. This skill documents
-the full workflow from first look to merge commit, including technical validation for PRs that touch UniFi API tool implementations.
+the full workflow from first look to merge, including technical validation for PRs that touch UniFi API tool implementations.
 
 ## Prerequisites
 
@@ -519,16 +519,16 @@ gh pr view <PR-number> --json mergeStateStatus,reviewDecision,mergeable
 the blocking condition (get missing approvals, wait for pending checks) before proceeding.
 
 ```bash
-# Merge with a merge commit (not squash) to preserve contributor commits
-gh pr merge <PR-number> --merge
+# Squash-merge is the repo standard — one clean commit per PR on main
+gh pr merge <PR-number> --squash
 ```
 
-Prefer merge commits over squash so individual commits from the contributor remain visible
-in history. Squash only if the branch history is genuinely noisy.
+Squash-and-merge is the default: it keeps `main` linear with a single commit per PR rather
+than carrying every intermediate or force-push commit from the contributor's fork branch.
 
-**Merge strategy override:** The merge-commit default can be overridden on explicit user instruction.
-If the user specifies squash-merge for a PR, apply it without hesitation — do not silently revert
-to the default. Acknowledge the override explicitly. Reference: PRs #315, #316.
+**Merge strategy override:** The squash default can be overridden on explicit user instruction.
+If the user asks for a merge commit (`--merge`) to preserve the contributor's individual commits,
+apply it without hesitation — do not silently revert to the default. Acknowledge the override explicitly.
 
 ---
 
