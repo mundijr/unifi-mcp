@@ -1,4 +1,4 @@
-# Protect Server Tool Reference (59 tools)
+# Protect Server Tool Reference (61 tools)
 
 Complete reference for `protect_*` tools. All read tools are always available. All mutations are **disabled by default** — the user must explicitly enable them because Protect controls physical security hardware.
 
@@ -114,7 +114,7 @@ Always available, regardless of registration mode.
 ## Devices: Lights, Sensors, Chimes
 
 <!-- AUTO:tools:devices -->
-6 tools.
+7 tools.
 
 | Tool | Type | Description |
 |------|------|-------------|
@@ -122,12 +122,14 @@ Always available, regardless of registration mode.
 | `protect_list_lights` | Read | Lists all UniFi Protect floodlight devices with their name, connection state, brightness level, PIR motion sensitivity, and paired camera. |
 | `protect_list_sensors` | Read | Lists all UniFi Protect sensor devices (motion, door/window, temperature, humidity, light level, leak detection). |
 | `protect_trigger_chime` | Read | Plays the chime tone on a specific chime device. |
-| `protect_update_chime` | Mutate | Updates chime settings such as speaker volume (0-100), repeat times (1-6), and device name. |
+| `protect_update_chime` | Mutate | Updates chime settings. |
 | `protect_update_light` | Mutate | Updates light settings such as on/off state, LED brightness level (1-6), PIR motion sensitivity (0-100), motion-triggered duration (15-90... |
+| `protect_update_sensor_settings` | Mutate | Updates UniFi Protect sensor settings. |
 <!-- /AUTO:tools:devices -->
 
 **Permission env vars:**
 - `UNIFI_POLICY_PROTECT_LIGHTS_UPDATE=true`
+- `UNIFI_POLICY_PROTECT_SENSORS_UPDATE=true`
 - `UNIFI_POLICY_PROTECT_CHIMES_UPDATE=true`
 
 ---
@@ -151,7 +153,7 @@ Always available, regardless of registration mode.
 ## System
 
 <!-- AUTO:tools:system -->
-4 tools.
+5 tools.
 
 | Tool | Type | Description |
 |------|------|-------------|
@@ -159,6 +161,7 @@ Always available, regardless of registration mode.
 | `protect_get_health` | Read | Returns NVR health summary including CPU load and temperature, memory usage, and storage utilization. |
 | `protect_get_system_info` | Read | Returns NVR model, firmware version, uptime, storage usage, and connected device counts. |
 | `protect_list_viewers` | Read | Lists all connected Protect viewers (e.g., UP-Viewer, Viewport) with their connection state, firmware version, and assigned liveview. |
+| `protect_update_viewer` | Mutate | Updates a UniFi Protect viewer name or liveview assignment. |
 <!-- /AUTO:tools:system -->
 
 **Tips:**

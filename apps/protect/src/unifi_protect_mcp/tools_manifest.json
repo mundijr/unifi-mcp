@@ -1,5 +1,5 @@
 {
-  "count": 59,
+  "count": 61,
   "generated_by": "scripts/generate_tool_manifest.py",
   "module_map": {
     "protect_acknowledge_event": "unifi_protect_mcp.tools.events",
@@ -55,7 +55,9 @@
     "protect_update_chime": "unifi_protect_mcp.tools.devices",
     "protect_update_known_face": "unifi_protect_mcp.tools.recognition",
     "protect_update_known_license_plate": "unifi_protect_mcp.tools.recognition",
-    "protect_update_light": "unifi_protect_mcp.tools.devices"
+    "protect_update_light": "unifi_protect_mcp.tools.devices",
+    "protect_update_sensor_settings": "unifi_protect_mcp.tools.devices",
+    "protect_update_viewer": "unifi_protect_mcp.tools.system"
   },
   "note": "Auto-generated with full schemas from tool decorators. Do not edit manually.",
   "tools": [
@@ -5192,10 +5194,12 @@
     },
     {
       "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Updates chime settings such as speaker volume (0-100), repeat times (1-6), and device name. Requires confirm=True to apply. Supported keys: volume, repeat_times, name.",
+      "description": "Updates chime settings. Without camera_id, updates global speaker volume (0-100), repeat times (1-6), or device name. With camera_id, updates that camera's ring volume or repeat_times while preserving other camera ring settings. Per-camera ring settings require a Protect API key configured via UNIFI_PROTECT_API_KEY or UNIFI_API_KEY. Requires confirm=True to apply. Supported global keys: volume, repeat_times, name. Supported per-camera keys: camera_id, volume, repeat_times.",
       "name": "protect_update_chime",
       "permission_action": "update",
       "permission_category": "chime",
@@ -5211,7 +5215,7 @@
               "type": "boolean"
             },
             "settings": {
-              "description": "Dictionary of settings to update. Supported keys: volume (0-100 - speaker volume), repeat_times (1-6 - number of times to repeat the chime tone), name (string - device display name).",
+              "description": "Dictionary of settings to update. Supported keys: volume (0-100 - speaker volume or per-camera ring volume), repeat_times (1-6 - number of times to repeat the chime tone), name (string - device display name; global updates only), camera_id (camera UUID from protect_list_chimes ring settings; when supplied, volume/repeat_times apply only to that camera's ring setting).",
               "type": "object"
             }
           },
@@ -5673,6 +5677,216 @@
         }
       },
       "title": "Update Light"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Updates UniFi Protect sensor settings. Get sensor_id values from protect_list_sensors. Requires a Protect public API key configured on the server via UNIFI_PROTECT_API_KEY or UNIFI_API_KEY. Requires confirm=True to apply. Supported keys: name, light_settings, humidity_settings, temperature_settings, motion_settings, glass_break_settings, alarm_settings, schedule_mode, arm_profile_ids, has_custom_sensitivity_when_armed. Use snake_case inside nested settings, for example motion_settings.sensitivity_when_armed or light_settings.low_threshold.",
+      "name": "protect_update_sensor_settings",
+      "permission_action": "update",
+      "permission_category": "sensor",
+      "schema": {
+        "input": {
+          "properties": {
+            "confirm": {
+              "description": "When true, executes the mutation. When false (default), returns a preview of the changes.",
+              "type": "boolean"
+            },
+            "sensor_id": {
+              "description": "Sensor device UUID from protect_list_sensors",
+              "type": "string"
+            },
+            "settings": {
+              "description": "Dictionary of sensor settings to update. Supported keys: name, light_settings, humidity_settings, temperature_settings, motion_settings, glass_break_settings, alarm_settings, schedule_mode, arm_profile_ids, has_custom_sensitivity_when_armed. Nested setting dictionaries use snake_case keys.",
+              "type": "object"
+            }
+          },
+          "required": [
+            "sensor_id",
+            "settings"
+          ],
+          "type": "object"
+        },
+        "output": {
+          "additionalProperties": true,
+          "description": "Structured view of the existing UniFi MCP tool response contract.",
+          "properties": {
+            "data": {
+              "anyOf": [
+                {},
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Successful result payload.",
+              "title": "Data"
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Actionable error message for handled failures.",
+              "title": "Error"
+            },
+            "preview": {
+              "anyOf": [
+                {},
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Mutation preview payload returned before confirmation.",
+              "title": "Preview"
+            },
+            "requires_confirmation": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "True when a mutation preview requires caller confirmation.",
+              "title": "Requires Confirmation"
+            },
+            "success": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "True when the tool call succeeded; false for handled errors.",
+              "title": "Success"
+            }
+          },
+          "title": "UniFiToolResponse",
+          "type": "object"
+        }
+      },
+      "title": "Update Sensor Settings"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Updates a UniFi Protect viewer name or liveview assignment. Get viewer_id values from protect_list_viewers and liveview_id values from protect_list_liveviews. These IDs are scoped to the Protect viewer/liveview tool family - do not pass them to camera, sensor, or chime tools. Requires a Protect public API key configured on the server via UNIFI_PROTECT_API_KEY or UNIFI_API_KEY. Requires confirm=True to apply. Pass only the fields you want to change - current values are automatically preserved. Supported keys: name, liveview_id, clear_liveview. Set clear_liveview=True to remove the current liveview assignment.",
+      "name": "protect_update_viewer",
+      "permission_action": "update",
+      "permission_category": "system",
+      "schema": {
+        "input": {
+          "properties": {
+            "confirm": {
+              "description": "When true, executes the mutation. When false (default), returns a preview of the changes.",
+              "type": "boolean"
+            },
+            "settings": {
+              "description": "Dictionary of viewer settings to update. Supported keys: name, liveview_id, clear_liveview. Use liveview_id to assign a liveview from protect_list_liveviews, or clear_liveview=True to remove the current assignment.",
+              "type": "object"
+            },
+            "viewer_id": {
+              "description": "Viewer UUID from protect_list_viewers",
+              "type": "string"
+            }
+          },
+          "required": [
+            "viewer_id",
+            "settings"
+          ],
+          "type": "object"
+        },
+        "output": {
+          "additionalProperties": true,
+          "description": "Structured view of the existing UniFi MCP tool response contract.",
+          "properties": {
+            "data": {
+              "anyOf": [
+                {},
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Successful result payload.",
+              "title": "Data"
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Actionable error message for handled failures.",
+              "title": "Error"
+            },
+            "preview": {
+              "anyOf": [
+                {},
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Mutation preview payload returned before confirmation.",
+              "title": "Preview"
+            },
+            "requires_confirmation": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "True when a mutation preview requires caller confirmation.",
+              "title": "Requires Confirmation"
+            },
+            "success": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "True when the tool call succeeded; false for handled errors.",
+              "title": "Success"
+            }
+          },
+          "title": "UniFiToolResponse",
+          "type": "object"
+        }
+      },
+      "title": "Update Viewer"
     }
   ]
 }
