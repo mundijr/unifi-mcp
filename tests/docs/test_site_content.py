@@ -423,6 +423,33 @@ class PublicPageAccessibilityContractTests(unittest.TestCase):
         self.assertFalse(link_has_non_color_cue(overridden, ancestors={"footer"}))
 
 
+class ResponsiveLayoutContractTests(unittest.TestCase):
+    def test_outcome_grid_stays_balanced_until_the_mobile_breakpoint(self):
+        css = Path("docs/styles.css").read_text(encoding="utf-8")
+
+        self.assertRegex(
+            css,
+            r"(?m)^\.outcome-grid \{[^\n]*grid-template-columns: repeat\(2, 1fr\);",
+        )
+        self.assertIn(".outcome-grid article:nth-child(odd) { border-left: 0; }", css)
+        self.assertIn(
+            ".outcome-grid article:nth-child(n+3) { border-top: 1px solid var(--border); }",
+            css,
+        )
+        self.assertIn(
+            "@media (max-width: 980px) {",
+            css,
+        )
+        self.assertIn(
+            ".outcome-grid { grid-template-columns: repeat(2, 1fr); }",
+            css,
+        )
+        self.assertIn(
+            ".safety-grid, .outcome-grid, .next-paths { grid-template-columns: 1fr; }",
+            css,
+        )
+
+
 class PrivacyDataFlowContractTests(unittest.TestCase):
     def setUp(self):
         self.privacy = Path("docs/privacy.html").read_text(encoding="utf-8")
